@@ -1043,6 +1043,9 @@ const crawlerOptions = {
     // rate limits / WAF blocks: one page at a time, throttled to a polite requests-per-minute.
     maxConcurrency: useProfile ? 1 : 6,
     maxRequestsPerMinute: useProfile ? 30 : 300,
+    // Don't let a single blocked/forbidden page (e.g. an occasional 403) retire the session and
+    // abort the whole crawl - we run one real authenticated session and just skip bad pages.
+    useSessionPool: false,
     requestHandlerTimeoutSecs: 60,
     navigationTimeoutSecs: 30,
     
