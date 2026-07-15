@@ -747,6 +747,59 @@ let savedCount = 0;
 let assetCount = 0;
 const savedAssets = new Set();
 
+// Same-site helpers: treat all subdomains of the registrable domain (e.g. assets.<site>) as
+// part of the site so their assets are captured and rewritten for offline viewing.
+const DQ = String.fromCharCode(34);
+const SQ = String.fromCharCode(39);
+function baseDomainOf(h) { const p = h.split('.'); return p.length <= 2 ? h : p.slice(-2).join('.'); }
+const SITE_BASE = baseDomainOf(startUrlObj.hostname);
+function isSameSite(h) { return h === startUrlObj.hostname || h === SITE_BASE || h.endsWith('.' + SITE_BASE); }
+// On-disk path (relative to the site folder, leading '/') for a same-site resource. Assets on
+// other subdomains are namespaced under /_ext/<host>/ to avoid collisions.
+function localAssetPath(host, pathname) { return host === startUrlObj.hostname ? pathname : ('/_ext/' + host + pathname); }
+function stripQuotes(s) {
+    s = (s || '').trim();
+    if (s.length >= 2 && ((s[0] === DQ && s[s.length - 1] === DQ) || (s[0] === SQ && s[s.length - 1] === SQ))) return s.slice(1, -1).trim();
+    return s;
+}
+// Map a reference (absolute URL / //host / root-absolute path) to a same-site on-disk path,
+// or null to leave it unchanged (external host, data:, already-relative, etc.).
+function refToLocal(ref) {
+    if (!ref) return null;
+    ref = ref.trim();
+    if (ref === '' || ref.startsWith('data:') || ref.startsWith('#') || ref.startsWith('mailto:') || ref.startsWith('tel:') || ref.startsWith('javascript:') || ref.startsWith('blob:')) return null;
+    if (/^https?:\/\//i.test(ref) || ref.startsWith('//')) {
+        try {
+            const u = new URL(ref.startsWith('//') ? ('https:' + ref) : ref);
+            if (!isSameSite(u.hostname)) return null;
+            return localAssetPath(u.hostname, u.pathname);
+        } catch { return null; }
+    }
+    if (ref.startsWith('/') && !ref.startsWith('//')) return ref.split('?')[0].split('#')[0];
+    return null;
+}
+// Rewrite same-site references in HTML or CSS to paths relative to `dir` (site-root-relative).
+function rewriteRefs(content, dir) {
+    const urlStop = '[^\\s' + SQ + DQ + ')>]';
+    content = content.replace(new RegExp('https?://' + urlStop + '+', 'gi'), function(m) {
+        const local = refToLocal(m);
+        return local ? relPath(dir, local) : m;
+    });
+    content = content.replace(/url\(([^)]*)\)/gi, function(m, inner) {
+        const local = refToLocal(stripQuotes(inner));
+        return local ? ('url(' + relPath(dir, local) + ')') : m;
+    });
+    content = content.replace(new RegExp(DQ + '(/(?!/)[^' + DQ + ']*)' + DQ, 'g'), function(m, p) {
+        const local = refToLocal(p);
+        return local ? (DQ + relPath(dir, local) + DQ) : m;
+    });
+    content = content.replace(new RegExp(SQ + '(/(?!/)[^' + SQ + ']*)' + SQ, 'g'), function(m, p) {
+        const local = refToLocal(p);
+        return local ? (SQ + relPath(dir, local) + SQ) : m;
+    });
+    return content;
+}
+
 // Download a URL as text
 function fetchText(url) {
     return new Promise((resolve, reject) => {
@@ -811,15 +864,21 @@ async function discoverFromSitemap() {
 async function saveAsset(url, body) {
     try {
         const u = new URL(url);
-        if (u.hostname !== startUrlObj.hostname) return;
-        
-        let assetPath = u.pathname;
-        if (savedAssets.has(assetPath)) return;
-        savedAssets.add(assetPath);
-        
-        const fullPath = join(hostDir, assetPath);
+        if (!isSameSite(u.hostname)) return;
+
+        const localPath = localAssetPath(u.hostname, u.pathname);
+        if (savedAssets.has(localPath)) return;
+        savedAssets.add(localPath);
+
+        let out = body;
+        // Rewrite url()/@import inside CSS so fonts and background images resolve offline.
+        if (/\.css(\?|$)/i.test(u.pathname)) {
+            out = Buffer.from(rewriteRefs(body.toString('utf-8'), dirname(localPath)), 'utf-8');
+        }
+
+        const fullPath = join(hostDir, localPath);
         await mkdir(dirname(fullPath), { recursive: true });
-        await writeFile(fullPath, body);
+        await writeFile(fullPath, out);
         assetCount++;
     } catch {}
 }
@@ -841,34 +900,10 @@ function relPath(fromDir, toPath) {
     return rel;
 }
 
-// Convert absolute URLs in HTML to relative paths for offline viewing
-function convertLinksToRelative(html, pageDir) {
-    const origin = startUrlObj.protocol + '//' + startUrlObj.host;
-    const escapedOrigin = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    // Replace full URLs (https://host/path) with relative paths
-    const fullUrlRe = new RegExp(escapedOrigin + '(/[^\\s' + String.fromCharCode(34) + String.fromCharCode(39) + '>]*)', 'g');
-    html = html.replace(fullUrlRe, function(m, p) {
-        return relPath(pageDir, p);
-    });
-    
-    // Replace ALL remaining absolute paths starting with / in quoted contexts
-    // This catches href, src, import(), url(), and any other references
-    const dq = String.fromCharCode(34);
-    const sq = String.fromCharCode(39);
-    
-    html = html.replace(new RegExp(dq + '(\/(?!\/)[^' + dq + ']*)' + dq, 'g'), function(m, p) {
-        // Skip data URIs and protocol-relative
-        if (p.startsWith('/data:') || p.startsWith('//')) return m;
-        return dq + relPath(pageDir, p) + dq;
-    });
-    
-    // Single-quoted: '/<path>'
-    html = html.replace(new RegExp(sq + '(\/(?!\/)[^' + sq + ']*)' + sq, 'g'), function(m, p) {
-        if (p.startsWith('/data:') || p.startsWith('//')) return m;
-        return sq + relPath(pageDir, p) + sq;
-    });
-    
+// Rewrite same-site links/assets to relative paths and strip analytics for offline viewing.
+function rewriteHtml(html, pageDir) {
+    html = rewriteRefs(html, pageDir);
+
     // Remove external tracking/analytics scripts that won't work offline
     if (stripAnalytics) {
         html = html.replace(/<script[^>]*src=[^>]*cdn-cgi[^>]*><\/script>/gi, '');
@@ -933,8 +968,8 @@ const crawlerOptions = {
                     if (status < 200 || status >= 300) return;
                     
                     const u = new URL(url);
-                    if (u.hostname !== startUrlObj.hostname) return;
-                    
+                    if (!isSameSite(u.hostname)) return;
+
                     // Skip HTML pages (those are saved by the requestHandler)
                     const contentType = response.headers()['content-type'] || '';
                     if (contentType.match(/^text\/html/i)) return;
@@ -982,7 +1017,7 @@ const crawlerOptions = {
         
         // Convert absolute paths to relative for offline viewing
         const pageDir = dirname(savePath);
-        html = convertLinksToRelative(html, pageDir);
+        html = rewriteHtml(html, pageDir);
         
         const fullPath = join(hostDir, savePath);
         
