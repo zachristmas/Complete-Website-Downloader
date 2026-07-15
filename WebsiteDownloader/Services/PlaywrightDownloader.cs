@@ -908,6 +908,16 @@ const crawlerOptions = {
     
     preNavigationHooks: [
         async ({ page }) => {
+            // A persistent context opens with a stray about:blank tab that sits in front of
+            // the crawl tab; close it so a headful run actually shows the page being crawled.
+            try {
+                for (const other of page.context().pages()) {
+                    if (other !== page && (other.url() === 'about:blank' || other.url() === '')) {
+                        await other.close().catch(() => {});
+                    }
+                }
+            } catch {}
+
             // Intercept ALL same-host responses to save assets
             page.on('response', async (response) => {
                 try {
@@ -938,6 +948,16 @@ const crawlerOptions = {
 
         // Wait for content to render
         await page.waitForLoadState('networkidle').catch(() => {});
+
+        // If the page redirected off-site (typically to a login screen), it can't be saved.
+        // Surface it clearly instead of skipping silently, so 'nothing downloaded' is explained.
+        try {
+            const landed = new URL(page.url());
+            if (landed.hostname !== startUrlObj.hostname) {
+                console.log(`[ERROR] ${request.url} redirected off-site to ${page.url()} - looks like a login page. Not logged in to this site in the selected browser profile? Sign in first (Open in Browser), then close the browser and retry.`);
+                return;
+            }
+        } catch {}
 
         if (waitMs > 0) {
             await new Promise(r => setTimeout(r, waitMs));
@@ -1001,6 +1021,9 @@ if (useProfile) {
 const crawler = new PlaywrightCrawler(crawlerOptions);
 
 await crawler.run(startUrls);
+if (savedCount === 0) {
+    console.log(`[ERROR] No pages were saved. If this site needs a login, sign in to it in the selected browser profile first (use the 'Open in Browser' button, complete the login, then CLOSE the browser) and download again. The start page likely redirected to a login screen.`);
+}
 console.log(`[DONE] Downloaded ${savedCount} pages + ${assetCount} assets from ${startUrlObj.hostname}`);
 process.exit(0);
 ";
