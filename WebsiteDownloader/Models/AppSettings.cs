@@ -74,6 +74,15 @@ namespace WebsiteDownloader.Models
         
         // Playwright-specific settings
         public bool StripAnalyticsScripts { get; set; } = true;  // Remove tracking/analytics scripts for offline viewing
+
+        // Playwright browser-profile reuse: drive the user's real Chrome/Edge profile via a
+        // persistent context so the crawl inherits their existing login session. Intended for
+        // SPAs / dynamic sites behind auth, where exported cookies aren't enough.
+        public bool PlaywrightUseBrowserProfile { get; set; } = false;      // launchPersistentContext + channel
+        public string PlaywrightBrowserChannel { get; set; } = "chrome";    // "chrome" or "msedge"
+        public string PlaywrightUserDataDir { get; set; } = "";             // empty = auto-detect for the channel
+        public string PlaywrightProfileDirectory { get; set; } = "Default"; // profile subfolder within "User Data"
+        public bool PlaywrightHeadful { get; set; } = true;                 // show the browser window during the crawl
         
         // Bandwidth scheduler
         public bool EnableBandwidthScheduler { get; set; } = false;
@@ -234,6 +243,14 @@ namespace WebsiteDownloader.Models
             // Hand-edited files may contain out-of-range enum values
             if (!System.Enum.IsDefined(typeof(Services.DirectoryStructure), DirectoryStructure))
                 DirectoryStructure = Services.DirectoryStructure.Default;
+
+            // Playwright profile reuse: normalize the channel and profile fields
+            PlaywrightBrowserChannel =
+                string.Equals(PlaywrightBrowserChannel, "msedge", StringComparison.OrdinalIgnoreCase)
+                    ? "msedge" : "chrome";
+            PlaywrightUserDataDir = PlaywrightUserDataDir ?? "";
+            if (string.IsNullOrWhiteSpace(PlaywrightProfileDirectory))
+                PlaywrightProfileDirectory = "Default";
 
             // Ensure window dimensions are reasonable
             if (WindowWidth < 400) WindowWidth = 600;

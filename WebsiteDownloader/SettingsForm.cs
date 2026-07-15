@@ -135,6 +135,10 @@ namespace WebsiteDownloader
             // Engine
             cboEngine.SelectedIndex = (int)_settings.Engine;
             chkStripAnalytics.Checked = _settings.StripAnalyticsScripts;
+            chkUseBrowserProfile.Checked = _settings.PlaywrightUseBrowserProfile;
+            cboBrowserChannel.SelectedIndex =
+                string.Equals(_settings.PlaywrightBrowserChannel, "msedge", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            chkShowBrowser.Checked = _settings.PlaywrightHeadful;
             UpdateEngineStatus();
 
             // UI settings
@@ -205,6 +209,9 @@ namespace WebsiteDownloader
             // Engine
             _settings.Engine = (DownloadEngine)cboEngine.SelectedIndex;
             _settings.StripAnalyticsScripts = chkStripAnalytics.Checked;
+            _settings.PlaywrightUseBrowserProfile = chkUseBrowserProfile.Checked;
+            _settings.PlaywrightBrowserChannel = cboBrowserChannel.SelectedIndex == 1 ? "msedge" : "chrome";
+            _settings.PlaywrightHeadful = chkShowBrowser.Checked;
 
             // UI settings
             _settings.OpenFolderAfterDownload = chkOpenFolderAfterDownload.Checked;
@@ -430,6 +437,10 @@ namespace WebsiteDownloader
                 SetSchedulerControlsEnabled(defaults.EnableBandwidthScheduler);
                 cboEngine.SelectedIndex = (int)defaults.Engine;
                 chkStripAnalytics.Checked = defaults.StripAnalyticsScripts;
+                chkUseBrowserProfile.Checked = defaults.PlaywrightUseBrowserProfile;
+                cboBrowserChannel.SelectedIndex = 0;
+                chkShowBrowser.Checked = defaults.PlaywrightHeadful;
+                UpdateBrowserProfileControls();
             }
         }
 
@@ -457,6 +468,69 @@ namespace WebsiteDownloader
             {
                 lblEngineStatus.Text = "";
                 btnSetupPlaywright.Visible = false;
+            }
+
+            UpdateBrowserProfileControls();
+        }
+
+        private void chkUseBrowserProfile_CheckedChanged(object sender, EventArgs e)
+        {
+            UpdateBrowserProfileControls();
+        }
+
+        /// <summary>
+        /// Enables the browser-profile controls only for the Playwright engine, and the channel
+        /// picker only when profile reuse is actually turned on.
+        /// </summary>
+        private void UpdateBrowserProfileControls()
+        {
+            bool isPlaywright = cboEngine.SelectedIndex == (int)DownloadEngine.Playwright;
+            chkUseBrowserProfile.Enabled = isPlaywright;
+
+            chkShowBrowser.Enabled = isPlaywright;
+
+            bool useProfile = isPlaywright && chkUseBrowserProfile.Checked;
+            lblBrowserChannel.Enabled = useProfile;
+            cboBrowserChannel.Enabled = useProfile;
+            btnLaunchBrowser.Enabled = useProfile;
+            lblProfileHint.Enabled = useProfile;
+        }
+
+        private void btnLaunchBrowser_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var downloader = new PlaywrightDownloader(new FileAppLogger())
+                {
+                    BrowserChannel = cboBrowserChannel.SelectedIndex == 1 ? "msedge" : "chrome",
+                    UserDataDir = _settings.PlaywrightUserDataDir,
+                    ProfileDirectory = _settings.PlaywrightProfileDirectory
+                };
+
+                downloader.LaunchLoginBrowser();
+
+                MessageBox.Show(
+                    "Opened your browser using the same profile the download will use.\n\n" +
+                    "Sign in and confirm you can see the site, then CLOSE all browser windows " +
+                    "before starting a download — the profile must be unlocked for the crawl to reuse it.",
+                    "Browser launched",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                // Show full detail (type + inner) so it's actionable. The dialog text can be
+                // copied with Ctrl+C, and it's also written to the app log file.
+                var detail = ex.GetType().Name + ": " + ex.Message;
+                if (ex.InnerException != null)
+                    detail += "\n\nInner: " + ex.InnerException.Message;
+
+                MessageBox.Show(
+                    "Couldn't launch the browser:\n\n" + detail +
+                    "\n\n(Press Ctrl+C to copy this message.)",
+                    "Launch failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
             }
         }
 

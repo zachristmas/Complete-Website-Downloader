@@ -118,6 +118,12 @@ namespace WebsiteDownloader
             this.lblEngineStatus = new System.Windows.Forms.Label();
             this.btnSetupPlaywright = new System.Windows.Forms.Button();
             this.chkStripAnalytics = new System.Windows.Forms.CheckBox();
+            this.chkUseBrowserProfile = new System.Windows.Forms.CheckBox();
+            this.lblBrowserChannel = new System.Windows.Forms.Label();
+            this.cboBrowserChannel = new System.Windows.Forms.ComboBox();
+            this.btnLaunchBrowser = new System.Windows.Forms.Button();
+            this.chkShowBrowser = new System.Windows.Forms.CheckBox();
+            this.lblProfileHint = new System.Windows.Forms.Label();
             this.chkCheckUpdates = new System.Windows.Forms.CheckBox();
             
             // Schedule tab controls
@@ -179,7 +185,7 @@ namespace WebsiteDownloader
             this.tabControl.Location = new System.Drawing.Point(12, 12);
             this.tabControl.Name = "tabControl";
             this.tabControl.SelectedIndex = 0;
-            this.tabControl.Size = new System.Drawing.Size(460, 470);
+            this.tabControl.Size = new System.Drawing.Size(460, 590);
             this.tabControl.TabIndex = 0;
             
             // 
@@ -1032,9 +1038,15 @@ namespace WebsiteDownloader
             this.grpEngine.Controls.Add(this.lblEngineStatus);
             this.grpEngine.Controls.Add(this.btnSetupPlaywright);
             this.grpEngine.Controls.Add(this.chkStripAnalytics);
+            this.grpEngine.Controls.Add(this.chkUseBrowserProfile);
+            this.grpEngine.Controls.Add(this.lblBrowserChannel);
+            this.grpEngine.Controls.Add(this.cboBrowserChannel);
+            this.grpEngine.Controls.Add(this.btnLaunchBrowser);
+            this.grpEngine.Controls.Add(this.chkShowBrowser);
+            this.grpEngine.Controls.Add(this.lblProfileHint);
             this.grpEngine.Location = new System.Drawing.Point(18, 330);
             this.grpEngine.Name = "grpEngine";
-            this.grpEngine.Size = new System.Drawing.Size(416, 125);
+            this.grpEngine.Size = new System.Drawing.Size(416, 228);
             this.grpEngine.TabIndex = 9;
             this.grpEngine.TabStop = false;
             this.grpEngine.Text = "Download Engine";
@@ -1096,7 +1108,69 @@ namespace WebsiteDownloader
             this.chkStripAnalytics.TabIndex = 4;
             this.chkStripAnalytics.Text = "Strip analytics/tracking scripts for offline viewing";
             this.chkStripAnalytics.UseVisualStyleBackColor = true;
-            
+            //
+            // chkUseBrowserProfile
+            //
+            this.chkUseBrowserProfile.AutoSize = true;
+            this.chkUseBrowserProfile.Location = new System.Drawing.Point(18, 125);
+            this.chkUseBrowserProfile.Name = "chkUseBrowserProfile";
+            this.chkUseBrowserProfile.Size = new System.Drawing.Size(360, 17);
+            this.chkUseBrowserProfile.TabIndex = 5;
+            this.chkUseBrowserProfile.Text = "Reuse my browser login session (use my Chrome/Edge profile)";
+            this.chkUseBrowserProfile.UseVisualStyleBackColor = true;
+            this.chkUseBrowserProfile.CheckedChanged += new System.EventHandler(this.chkUseBrowserProfile_CheckedChanged);
+            //
+            // lblBrowserChannel
+            //
+            this.lblBrowserChannel.AutoSize = true;
+            this.lblBrowserChannel.Location = new System.Drawing.Point(35, 152);
+            this.lblBrowserChannel.Name = "lblBrowserChannel";
+            this.lblBrowserChannel.Size = new System.Drawing.Size(50, 13);
+            this.lblBrowserChannel.TabIndex = 6;
+            this.lblBrowserChannel.Text = "Browser:";
+            //
+            // cboBrowserChannel
+            //
+            this.cboBrowserChannel.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cboBrowserChannel.FormattingEnabled = true;
+            this.cboBrowserChannel.Items.AddRange(new object[] {
+            "Chrome",
+            "Edge"});
+            this.cboBrowserChannel.Location = new System.Drawing.Point(90, 149);
+            this.cboBrowserChannel.Name = "cboBrowserChannel";
+            this.cboBrowserChannel.Size = new System.Drawing.Size(120, 21);
+            this.cboBrowserChannel.TabIndex = 7;
+            //
+            // btnLaunchBrowser
+            //
+            this.btnLaunchBrowser.Location = new System.Drawing.Point(222, 147);
+            this.btnLaunchBrowser.Name = "btnLaunchBrowser";
+            this.btnLaunchBrowser.Size = new System.Drawing.Size(165, 25);
+            this.btnLaunchBrowser.TabIndex = 8;
+            this.btnLaunchBrowser.Text = "Launch browser to log in";
+            this.btnLaunchBrowser.UseVisualStyleBackColor = true;
+            this.btnLaunchBrowser.Click += new System.EventHandler(this.btnLaunchBrowser_Click);
+            //
+            // chkShowBrowser
+            //
+            this.chkShowBrowser.AutoSize = true;
+            this.chkShowBrowser.Location = new System.Drawing.Point(18, 176);
+            this.chkShowBrowser.Name = "chkShowBrowser";
+            this.chkShowBrowser.Size = new System.Drawing.Size(320, 17);
+            this.chkShowBrowser.TabIndex = 9;
+            this.chkShowBrowser.Text = "Show the browser window while downloading (headful)";
+            this.chkShowBrowser.UseVisualStyleBackColor = true;
+            //
+            // lblProfileHint
+            //
+            this.lblProfileHint.AutoSize = true;
+            this.lblProfileHint.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblProfileHint.Location = new System.Drawing.Point(15, 201);
+            this.lblProfileHint.Name = "lblProfileHint";
+            this.lblProfileHint.Size = new System.Drawing.Size(390, 13);
+            this.lblProfileHint.TabIndex = 8;
+            this.lblProfileHint.Text = "Log in first, then close all browser windows before downloading.";
+
             // 
             // tabSchedule
             // 
@@ -1277,7 +1351,7 @@ namespace WebsiteDownloader
             // btnSave
             // 
             this.btnSave.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnSave.Location = new System.Drawing.Point(316, 500);
+            this.btnSave.Location = new System.Drawing.Point(316, 620);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(75, 28);
             this.btnSave.TabIndex = 1;
@@ -1290,7 +1364,7 @@ namespace WebsiteDownloader
             // 
             this.btnCancel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.btnCancel.Location = new System.Drawing.Point(397, 500);
+            this.btnCancel.Location = new System.Drawing.Point(397, 620);
             this.btnCancel.Name = "btnCancel";
             this.btnCancel.Size = new System.Drawing.Size(75, 28);
             this.btnCancel.TabIndex = 2;
@@ -1302,7 +1376,7 @@ namespace WebsiteDownloader
             // btnResetDefaults
             // 
             this.btnResetDefaults.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
-            this.btnResetDefaults.Location = new System.Drawing.Point(12, 500);
+            this.btnResetDefaults.Location = new System.Drawing.Point(12, 620);
             this.btnResetDefaults.Name = "btnResetDefaults";
             this.btnResetDefaults.Size = new System.Drawing.Size(100, 28);
             this.btnResetDefaults.TabIndex = 3;
@@ -1317,7 +1391,7 @@ namespace WebsiteDownloader
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.btnCancel;
-            this.ClientSize = new System.Drawing.Size(484, 545);
+            this.ClientSize = new System.Drawing.Size(484, 665);
             this.Controls.Add(this.btnResetDefaults);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnSave);
@@ -1454,6 +1528,12 @@ namespace WebsiteDownloader
         private System.Windows.Forms.Label lblEngineStatus;
         private System.Windows.Forms.Button btnSetupPlaywright;
         private System.Windows.Forms.CheckBox chkStripAnalytics;
+        private System.Windows.Forms.CheckBox chkUseBrowserProfile;
+        private System.Windows.Forms.Label lblBrowserChannel;
+        private System.Windows.Forms.ComboBox cboBrowserChannel;
+        private System.Windows.Forms.Button btnLaunchBrowser;
+        private System.Windows.Forms.CheckBox chkShowBrowser;
+        private System.Windows.Forms.Label lblProfileHint;
         private System.Windows.Forms.CheckBox chkCheckUpdates;
         
         // Schedule tab controls

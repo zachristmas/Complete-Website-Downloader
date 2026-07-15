@@ -63,6 +63,9 @@ namespace WebsiteDownloader
             // Apply saved settings
             ApplySettings();
 
+            // Right-click Copy/Select All/Clear on the log and errors views
+            SetupLogContextMenus();
+
             // Set placeholder text
             SendMessage(txtUrl.Handle, EM_SETCUEBANNER, IntPtr.Zero, Strings.UrlPlaceholder);
 
@@ -79,7 +82,12 @@ namespace WebsiteDownloader
                 {
                     _downloader = new PlaywrightDownloader(_logger)
                     {
-                        StripAnalyticsScripts = _settings.StripAnalyticsScripts
+                        StripAnalyticsScripts = _settings.StripAnalyticsScripts,
+                        UseBrowserProfile = _settings.PlaywrightUseBrowserProfile,
+                        BrowserChannel = _settings.PlaywrightBrowserChannel,
+                        UserDataDir = _settings.PlaywrightUserDataDir,
+                        ProfileDirectory = _settings.PlaywrightProfileDirectory,
+                        Headful = _settings.PlaywrightHeadful
                     };
                 }
                 else
@@ -606,6 +614,52 @@ namespace WebsiteDownloader
 
             txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
             txtLog.ScrollToCaret();
+        }
+
+        /// <summary>
+        /// Adds right-click Copy / Select All / Clear menus to the output log and errors list
+        /// so their contents can be copied out (e.g. to share when reporting a problem).
+        /// </summary>
+        private void SetupLogContextMenus()
+        {
+            var logMenu = new ContextMenuStrip();
+            logMenu.Items.Add("Copy", null, (s, e) =>
+            {
+                if (txtLog.SelectionLength > 0)
+                    Clipboard.SetText(txtLog.SelectedText);
+                else if (txtLog.TextLength > 0)
+                    Clipboard.SetText(txtLog.Text);
+            });
+            logMenu.Items.Add("Select All", null, (s, e) => { txtLog.SelectAll(); txtLog.Focus(); });
+            logMenu.Items.Add(new ToolStripSeparator());
+            logMenu.Items.Add("Clear", null, (s, e) => txtLog.Clear());
+            txtLog.ContextMenuStrip = logMenu;
+
+            var errorsMenu = new ContextMenuStrip();
+            errorsMenu.Items.Add("Copy all errors", null, (s, e) => CopyErrorsToClipboard());
+            listViewErrors.ContextMenuStrip = errorsMenu;
+        }
+
+        /// <summary>
+        /// Copies every row in the errors list to the clipboard as tab-separated text.
+        /// </summary>
+        private void CopyErrorsToClipboard()
+        {
+            if (listViewErrors.Items.Count == 0) return;
+
+            var sb = new System.Text.StringBuilder();
+            foreach (ListViewItem item in listViewErrors.Items)
+            {
+                for (int i = 0; i < item.SubItems.Count; i++)
+                {
+                    if (i > 0) sb.Append('\t');
+                    sb.Append(item.SubItems[i].Text);
+                }
+                sb.AppendLine();
+            }
+
+            if (sb.Length > 0)
+                Clipboard.SetText(sb.ToString());
         }
 
         private void ClearLog()

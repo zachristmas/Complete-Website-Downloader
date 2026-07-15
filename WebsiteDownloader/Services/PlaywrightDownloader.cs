@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32;
 
 namespace WebsiteDownloader.Services
 {
@@ -32,6 +33,35 @@ namespace WebsiteDownloader.Services
         /// Whether to strip analytics/tracking scripts from saved HTML for cleaner offline viewing.
         /// </summary>
         public bool StripAnalyticsScripts { get; set; } = true;
+
+        /// <summary>
+        /// When true, the crawl launches the user's real Chrome/Edge profile (a persistent
+        /// context) so it inherits their existing login session instead of a clean Chromium.
+        /// </summary>
+        public bool UseBrowserProfile { get; set; } = false;
+
+        /// <summary>
+        /// Which installed browser channel to drive when <see cref="UseBrowserProfile"/> is set:
+        /// "chrome" or "msedge".
+        /// </summary>
+        public string BrowserChannel { get; set; } = "chrome";
+
+        /// <summary>
+        /// Path to the browser "User Data" directory. Empty means auto-detect the default for
+        /// <see cref="BrowserChannel"/>.
+        /// </summary>
+        public string UserDataDir { get; set; } = "";
+
+        /// <summary>
+        /// Which profile subfolder within "User Data" to use (e.g. "Default", "Profile 1").
+        /// </summary>
+        public string ProfileDirectory { get; set; } = "Default";
+
+        /// <summary>
+        /// Whether to show the browser window during the crawl (recommended when reusing a
+        /// profile, so the user can confirm the session and handle any re-auth prompts).
+        /// </summary>
+        public bool Headful { get; set; } = true;
 
         /// <summary>
         /// Path to the crawler runtime directory in AppData.
@@ -143,6 +173,9 @@ namespace WebsiteDownloader.Services
 
                 if (!reqs.CrawlerInstalled)
                     throw new InvalidOperationException("Crawler not set up. Go to Settings → Advanced → Setup Playwright Engine.");
+
+                if (UseBrowserProfile)
+                    ValidateBrowserProfile();
 
                 // Always update the crawler script to latest version
                 EnsureLatestScript();
@@ -281,7 +314,183 @@ namespace WebsiteDownloader.Services
             if (StripAnalyticsScripts)
                 sb.Append("--strip-analytics ");
 
+            if (UseBrowserProfile)
+            {
+                var channel = NormalizeChannel(BrowserChannel);
+                var dataDir = ResolveUserDataDir(channel);
+                var profileDir = string.IsNullOrWhiteSpace(ProfileDirectory) ? "Default" : ProfileDirectory;
+
+                sb.Append($"--browser-channel {channel} ");
+                sb.Append($"--user-data-dir \"{dataDir}\" ");
+                sb.Append($"--profile-directory \"{profileDir}\" ");
+                if (Headful)
+                    sb.Append("--headful ");
+            }
+
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Normalizes a browser channel string to a Playwright channel id ("chrome" or "msedge").
+        /// </summary>
+        internal static string NormalizeChannel(string channel)
+        {
+            return string.Equals(channel, "msedge", StringComparison.OrdinalIgnoreCase)
+                ? "msedge" : "chrome";
+        }
+
+        /// <summary>
+        /// Resolves the "User Data" directory for the given channel, honoring an explicit
+        /// <see cref="UserDataDir"/> override and otherwise using the platform default.
+        /// </summary>
+        internal string ResolveUserDataDir(string channel)
+        {
+            if (!string.IsNullOrWhiteSpace(UserDataDir))
+                return UserDataDir;
+
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return channel == "msedge"
+                ? Path.Combine(localAppData, "Microsoft", "Edge", "User Data")
+                : Path.Combine(localAppData, "Google", "Chrome", "User Data");
+        }
+
+        /// <summary>
+        /// Opens the real Chrome/Edge executable using the same channel and profile the crawl
+        /// will reuse, so the user can establish or confirm their login session (e.g. sign in
+        /// with Google) before downloading. This launches the plain browser — not a Playwright/
+        /// CDP-controlled instance — which avoids automation-detection blocks on interactive
+        /// logins; the session it creates lives in the same on-disk profile the crawl reuses.
+        /// </summary>
+        /// <param name="url">Optional URL to open; when null the browser opens normally.</param>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the profile folder or the browser executable cannot be found.
+        /// </exception>
+        public void LaunchLoginBrowser(string url = null)
+        {
+            var channel = NormalizeChannel(BrowserChannel);
+            var dataDir = ResolveUserDataDir(channel);
+            var profileDir = string.IsNullOrWhiteSpace(ProfileDirectory) ? "Default" : ProfileDirectory;
+            var friendlyName = channel == "msedge" ? "Edge" : "Chrome";
+
+            if (!Directory.Exists(dataDir))
+                throw new InvalidOperationException(
+                    $"{friendlyName} profile folder not found: {dataDir}. " +
+                    "Set the correct \"User Data\" path in Settings, or pick the other browser.");
+
+            var exePath = ResolveBrowserExecutable(channel);
+            if (exePath == null)
+                throw new InvalidOperationException(
+                    $"Couldn't locate the {friendlyName} executable on this machine. " +
+                    $"Make sure {friendlyName} is installed.");
+
+            var args = $"--profile-directory=\"{profileDir}\" --user-data-dir=\"{dataDir}\"";
+            if (!string.IsNullOrWhiteSpace(url))
+                args += $" \"{url}\"";
+
+            _logger.Info($"Launching {friendlyName} for login: {exePath} {args}");
+
+            // UseShellExecute=false + a fully-resolved path launches the browser directly via
+            // CreateProcess (predictable, and surfaces a clear Win32 error if it fails).
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = args,
+                UseShellExecute = false
+            });
+        }
+
+        /// <summary>
+        /// Resolves the full path to the Chrome/Edge executable, checking the Windows
+        /// "App Paths" registry entries first and then common install locations.
+        /// Returns null if it cannot be found.
+        /// </summary>
+        internal static string ResolveBrowserExecutable(string channel)
+        {
+            var exeName = channel == "msedge" ? "msedge.exe" : "chrome.exe";
+
+            // 1) "App Paths" registry (how the shell resolves a bare "chrome.exe"/"msedge.exe").
+            string[] appPathKeys =
+            {
+                @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + exeName,
+                @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\" + exeName,
+            };
+            foreach (var root in new[] { Registry.LocalMachine, Registry.CurrentUser })
+            {
+                foreach (var key in appPathKeys)
+                {
+                    try
+                    {
+                        using (var rk = root.OpenSubKey(key))
+                        {
+                            if (rk?.GetValue(null) is string path && File.Exists(path))
+                                return path;
+                        }
+                    }
+                    catch { /* registry access denied / malformed - fall through */ }
+                }
+            }
+
+            // 2) Common install locations.
+            var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            var candidates = channel == "msedge"
+                ? new[]
+                {
+                    Path.Combine(programFilesX86, @"Microsoft\Edge\Application\msedge.exe"),
+                    Path.Combine(programFiles, @"Microsoft\Edge\Application\msedge.exe"),
+                }
+                : new[]
+                {
+                    Path.Combine(programFiles, @"Google\Chrome\Application\chrome.exe"),
+                    Path.Combine(programFilesX86, @"Google\Chrome\Application\chrome.exe"),
+                    Path.Combine(localAppData, @"Google\Chrome\Application\chrome.exe"),
+                };
+
+            foreach (var candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Ensures the selected browser profile can be driven: the "User Data" directory must
+        /// exist, and the browser must not be running (Chrome/Edge lock the profile while open,
+        /// which prevents Playwright from launching a persistent context against it).
+        /// </summary>
+        private void ValidateBrowserProfile()
+        {
+            var channel = NormalizeChannel(BrowserChannel);
+            var dataDir = ResolveUserDataDir(channel);
+            var friendlyName = channel == "msedge" ? "Edge" : "Chrome";
+
+            if (!Directory.Exists(dataDir))
+                throw new InvalidOperationException(
+                    $"{friendlyName} profile folder not found: {dataDir}. " +
+                    "Set the correct \"User Data\" path in Settings, or pick the other browser.");
+
+            var processName = channel == "msedge" ? "msedge" : "chrome";
+            bool running;
+            try
+            {
+                running = Process.GetProcessesByName(processName).Length > 0;
+            }
+            catch
+            {
+                // If we can't enumerate processes, don't block the download; Playwright will
+                // surface a clear launch error if the profile really is locked.
+                running = false;
+            }
+
+            if (running)
+                throw new InvalidOperationException(
+                    $"{friendlyName} is currently running, so its profile is locked. " +
+                    $"Close ALL {friendlyName} windows — and any {friendlyName} background processes " +
+                    "(check the system tray and Task Manager) — then start the download again.");
         }
 
         private void ParseCrawlerOutput(string line)
@@ -498,6 +707,14 @@ const convertLinks = hasFlag('--convert-links');
 const useSitemap = hasFlag('--use-sitemap');
 const stripAnalytics = hasFlag('--strip-analytics');
 
+// Browser-profile reuse: when a channel + user-data-dir are supplied, drive the user's real
+// Chrome/Edge profile (a persistent context) so the crawl inherits their logged-in session.
+const browserChannel = getArg('--browser-channel');
+const userDataDir = getArg('--user-data-dir');
+const profileDirectory = getArg('--profile-directory') || 'Default';
+const headful = hasFlag('--headful');
+const useProfile = !!(browserChannel && userDataDir);
+
 if (!startUrl || !outputBase) {
     console.error('Usage: node crawler.mjs --url <url> --output <dir> [--depth N] [--wait ms] [--convert-links] [--use-sitemap]');
     process.exit(1);
@@ -683,9 +900,9 @@ if (useSitemap) {
 
 console.log(`[STATUS] Crawling ${startUrls.length} URLs (max depth: ${maxDepth}, base path: ${basePath})`);
 
-const crawler = new PlaywrightCrawler({
+const crawlerOptions = {
     maxRequestsPerCrawl: 50000,
-    maxConcurrency: 3,
+    maxConcurrency: useProfile ? 1 : 3,
     requestHandlerTimeoutSecs: 60,
     navigationTimeoutSecs: 30,
     
@@ -763,7 +980,25 @@ const crawler = new PlaywrightCrawler({
     failedRequestHandler({ request, error }) {
         console.log(`[ERROR] ${request.url}: ${error.message}`);
     },
-});
+};
+
+// Reuse the real browser profile via a persistent context so the crawl is authenticated.
+// channel selects the installed browser (system Chrome/Edge, not bundled Chromium);
+// --profile-directory picks the profile within the User Data folder.
+if (useProfile) {
+    crawlerOptions.launchContext = {
+        userDataDir: userDataDir,
+        useIncognitoPages: false,
+        launchOptions: {
+            channel: browserChannel,
+            headless: !headful,
+            args: ['--profile-directory=' + profileDirectory],
+        },
+    };
+    console.log(`[STATUS] Reusing ${browserChannel} profile at ${userDataDir} (profile: ${profileDirectory}, headful: ${headful})`);
+}
+
+const crawler = new PlaywrightCrawler(crawlerOptions);
 
 await crawler.run(startUrls);
 console.log(`[DONE] Downloaded ${savedCount} pages + ${assetCount} assets from ${startUrlObj.hostname}`);
