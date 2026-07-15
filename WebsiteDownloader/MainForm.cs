@@ -146,6 +146,49 @@ namespace WebsiteDownloader
             {
                 this.Size = new Size(_settings.WindowWidth, _settings.WindowHeight);
             }
+
+            UpdateOpenBrowserButton();
+        }
+
+        /// <summary>
+        /// The "Open in Browser" button only applies to the Playwright engine with browser-profile
+        /// reuse enabled, so it's shown only in that mode.
+        /// </summary>
+        private void UpdateOpenBrowserButton()
+        {
+            btnOpenBrowser.Visible =
+                _settings.Engine == Services.DownloadEngine.Playwright
+                && _settings.PlaywrightUseBrowserProfile;
+        }
+
+        private void btnOpenBrowser_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var browser = new PlaywrightDownloader(_logger)
+                {
+                    BrowserChannel = _settings.PlaywrightBrowserChannel,
+                    UserDataDir = _settings.PlaywrightUserDataDir,
+                    ProfileDirectory = _settings.PlaywrightProfileDirectory
+                };
+
+                // Open straight to the target URL (if valid) so the user lands on the site to log
+                // in; otherwise open the browser normally so they can navigate themselves.
+                string url = null;
+                var raw = txtUrl.Text.Trim();
+                if (Uri.TryCreate(raw, UriKind.Absolute, out var uri)
+                    && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                {
+                    url = uri.ToString();
+                }
+
+                browser.LaunchLoginBrowser(url);
+                LogMessage("Opened browser for login. Sign in, then close ALL browser windows before downloading.");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Couldn't open the browser: " + ex.Message);
+            }
         }
 
         private async void MainForm_Load(object sender, EventArgs e)
@@ -386,13 +429,16 @@ namespace WebsiteDownloader
                 if (settingsForm.ShowDialog(this) == DialogResult.OK)
                 {
                     _settings.Save();
-                    
+
                     // Re-initialize downloader if engine changed
                     if (_settings.Engine != previousEngine)
                     {
                         _downloader?.Dispose();
                         InitializeDownloader();
                     }
+
+                    // Engine or profile toggle may have changed the button's applicability
+                    UpdateOpenBrowserButton();
                 }
             }
         }
@@ -579,6 +625,7 @@ namespace WebsiteDownloader
             btnDownload.Visible = !downloading;
             btnCancel.Visible = downloading;
             btnSettings.Enabled = !downloading;
+            btnOpenBrowser.Enabled = !downloading;
             progressBar.Visible = downloading;
 
             if (downloading)

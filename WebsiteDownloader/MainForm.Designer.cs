@@ -31,6 +31,7 @@ namespace WebsiteDownloader
             this.btnCancel = new System.Windows.Forms.Button();
             this.btnSettings = new System.Windows.Forms.Button();
             this.btnHistory = new System.Windows.Forms.Button();
+            this.btnOpenBrowser = new System.Windows.Forms.Button();
             this.tabControlOutput = new System.Windows.Forms.TabControl();
             this.tabPageLog = new System.Windows.Forms.TabPage();
             this.tabPageErrors = new System.Windows.Forms.TabPage();
@@ -183,7 +184,18 @@ namespace WebsiteDownloader
             this.btnHistory.Text = "📋 History";
             this.btnHistory.UseVisualStyleBackColor = true;
             this.btnHistory.Click += new System.EventHandler(this.btnHistory_Click);
-            
+
+            // btnOpenBrowser
+            this.btnOpenBrowser.Font = new System.Drawing.Font("Segoe UI", 10F);
+            this.btnOpenBrowser.Location = new System.Drawing.Point(204, 200);
+            this.btnOpenBrowser.Name = "btnOpenBrowser";
+            this.btnOpenBrowser.Size = new System.Drawing.Size(175, 40);
+            this.btnOpenBrowser.TabIndex = 5;
+            this.btnOpenBrowser.Text = "🌐 Open in Browser";
+            this.btnOpenBrowser.UseVisualStyleBackColor = true;
+            this.btnOpenBrowser.Visible = false;
+            this.btnOpenBrowser.Click += new System.EventHandler(this.btnOpenBrowser_Click);
+
             // progressBar
             this.progressBar.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
             this.progressBar.Location = new System.Drawing.Point(12, 250);
@@ -291,6 +303,7 @@ namespace WebsiteDownloader
             this.Controls.Add(this.tabControlOutput);
             this.Controls.Add(this.progressBar);
             this.Controls.Add(this.btnHistory);
+            this.Controls.Add(this.btnOpenBrowser);
             this.Controls.Add(this.btnSettings);
             this.Controls.Add(this.btnCancel);
             this.Controls.Add(this.btnDownload);
@@ -331,6 +344,7 @@ namespace WebsiteDownloader
         private System.Windows.Forms.Button btnCancel;
         private System.Windows.Forms.Button btnSettings;
         private System.Windows.Forms.Button btnHistory;
+        private System.Windows.Forms.Button btnOpenBrowser;
         private System.Windows.Forms.TabControl tabControlOutput;
         private System.Windows.Forms.TabPage tabPageLog;
         private System.Windows.Forms.TabPage tabPageErrors;
