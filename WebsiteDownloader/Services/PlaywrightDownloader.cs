@@ -915,7 +915,7 @@ console.log(`[STATUS] Crawling ${startUrls.length} URLs (max depth: ${maxDepth},
 
 const crawlerOptions = {
     maxRequestsPerCrawl: 50000,
-    maxConcurrency: useProfile ? 1 : 3,
+    maxConcurrency: useProfile ? 4 : 6,
     requestHandlerTimeoutSecs: 60,
     navigationTimeoutSecs: 30,
     
@@ -924,16 +924,6 @@ const crawlerOptions = {
             // Navigate with a fast, reliable wait. 'load'/'networkidle' can stall indefinitely
             // on sites with continuous background traffic; 'domcontentloaded' always resolves.
             if (gotoOptions) gotoOptions.waitUntil = 'domcontentloaded';
-
-            // A persistent context opens with a stray about:blank tab that sits in front of
-            // the crawl tab; close it so a headful run actually shows the page being crawled.
-            try {
-                for (const other of page.context().pages()) {
-                    if (other !== page && (other.url() === 'about:blank' || other.url() === '')) {
-                        await other.close().catch(() => {});
-                    }
-                }
-            } catch {}
 
             // Intercept ALL same-host responses to save assets
             page.on('response', async (response) => {
@@ -962,9 +952,6 @@ const crawlerOptions = {
         // Only process same-host pages under the base path
         if (url.hostname !== startUrlObj.hostname) return;
         if (basePath !== '/' && !url.pathname.startsWith(basePath)) return;
-
-        // Bring the crawl page to the front so a headful run shows it (not the idle tab).
-        await page.bringToFront().catch(() => {});
 
         // Wait for content to render, but never hang: 'networkidle' can never fire on sites with
         // continuous background requests (analytics, sockets), so bound it and fall back cleanly.
