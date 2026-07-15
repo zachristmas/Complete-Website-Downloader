@@ -1039,7 +1039,10 @@ console.log(`[STATUS] Crawling ${startUrls.length} URLs (max depth: ${maxDepth},
 
 const crawlerOptions = {
     maxRequestsPerCrawl: 50000,
-    maxConcurrency: useProfile ? 4 : 6,
+    // Profile crawls run against a real, authenticated session, so stay gentle to avoid tripping
+    // rate limits / WAF blocks: one page at a time, throttled to a polite requests-per-minute.
+    maxConcurrency: useProfile ? 1 : 6,
+    maxRequestsPerMinute: useProfile ? 30 : 300,
     requestHandlerTimeoutSecs: 60,
     navigationTimeoutSecs: 30,
     
