@@ -715,6 +715,19 @@ const profileDirectory = getArg('--profile-directory') || 'Default';
 const headful = hasFlag('--headful');
 const useProfile = !!(browserChannel && userDataDir);
 
+// Playwright/Crawlee can emit a browser launch/close race during shutdown (after the crawl
+// has already saved pages). Don't let that async error crash the process with a huge stack.
+const isTeardownNoise = (err) => {
+    const m = (err && err.message) ? err.message : String(err);
+    return m.includes('has been closed') || m.includes('Failed to launch browser');
+};
+process.on('unhandledRejection', (err) => {
+    if (!isTeardownNoise(err)) console.log(`[ERROR] ${(err && err.message) || err}`);
+});
+process.on('uncaughtException', (err) => {
+    if (!isTeardownNoise(err)) console.log(`[ERROR] ${(err && err.message) || err}`);
+});
+
 if (!startUrl || !outputBase) {
     console.error('Usage: node crawler.mjs --url <url> --output <dir> [--depth N] [--wait ms] [--convert-links] [--use-sitemap]');
     process.exit(1);
@@ -907,7 +920,11 @@ const crawlerOptions = {
     navigationTimeoutSecs: 30,
     
     preNavigationHooks: [
-        async ({ page }) => {
+        async ({ page }, gotoOptions) => {
+            // Navigate with a fast, reliable wait. 'load'/'networkidle' can stall indefinitely
+            // on sites with continuous background traffic; 'domcontentloaded' always resolves.
+            if (gotoOptions) gotoOptions.waitUntil = 'domcontentloaded';
+
             // A persistent context opens with a stray about:blank tab that sits in front of
             // the crawl tab; close it so a headful run actually shows the page being crawled.
             try {
@@ -946,8 +963,13 @@ const crawlerOptions = {
         if (url.hostname !== startUrlObj.hostname) return;
         if (basePath !== '/' && !url.pathname.startsWith(basePath)) return;
 
-        // Wait for content to render
-        await page.waitForLoadState('networkidle').catch(() => {});
+        // Bring the crawl page to the front so a headful run shows it (not the idle tab).
+        await page.bringToFront().catch(() => {});
+
+        // Wait for content to render, but never hang: 'networkidle' can never fire on sites with
+        // continuous background requests (analytics, sockets), so bound it and fall back cleanly.
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
         // If the page redirected off-site (typically to a login screen), it can't be saved.
         // Surface it clearly instead of skipping silently, so 'nothing downloaded' is explained.
@@ -1020,12 +1042,20 @@ if (useProfile) {
 
 const crawler = new PlaywrightCrawler(crawlerOptions);
 
-await crawler.run(startUrls);
+try {
+    await crawler.run(startUrls);
+} catch (err) {
+    // A launch/close race can throw during shutdown after pages were already saved; that's
+    // benign. Only surface a genuine crawl failure.
+    if (!isTeardownNoise(err))
+        console.log(`[ERROR] Crawl failed: ${(err && err.message) || err}`);
+}
+
 if (savedCount === 0) {
     console.log(`[ERROR] No pages were saved. If this site needs a login, sign in to it in the selected browser profile first (use the 'Open in Browser' button, complete the login, then CLOSE the browser) and download again. The start page likely redirected to a login screen.`);
 }
 console.log(`[DONE] Downloaded ${savedCount} pages + ${assetCount} assets from ${startUrlObj.hostname}`);
-process.exit(0);
+process.exit(savedCount > 0 ? 0 : 1);
 ";
         }
 

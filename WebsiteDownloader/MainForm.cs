@@ -669,14 +669,13 @@ namespace WebsiteDownloader
         /// </summary>
         private void SetupLogContextMenus()
         {
+            // A TextBox caps at 32767 chars by default and silently drops the rest, so a long
+            // crawl log gets truncated (and can't be copied in full). 0 removes the cap.
+            txtLog.MaxLength = 0;
+
             var logMenu = new ContextMenuStrip();
-            logMenu.Items.Add("Copy", null, (s, e) =>
-            {
-                if (txtLog.SelectionLength > 0)
-                    Clipboard.SetText(txtLog.SelectedText);
-                else if (txtLog.TextLength > 0)
-                    Clipboard.SetText(txtLog.Text);
-            });
+            logMenu.Items.Add("Copy all", null, (s, e) => CopyToClipboard(txtLog.Text));
+            logMenu.Items.Add("Copy selection", null, (s, e) => CopyToClipboard(txtLog.SelectedText));
             logMenu.Items.Add("Select All", null, (s, e) => { txtLog.SelectAll(); txtLog.Focus(); });
             logMenu.Items.Add(new ToolStripSeparator());
             logMenu.Items.Add("Clear", null, (s, e) => txtLog.Clear());
@@ -685,6 +684,17 @@ namespace WebsiteDownloader
             var errorsMenu = new ContextMenuStrip();
             errorsMenu.Items.Add("Copy all errors", null, (s, e) => CopyErrorsToClipboard());
             listViewErrors.ContextMenuStrip = errorsMenu;
+        }
+
+        /// <summary>
+        /// Copies text to the clipboard, ignoring the transient failures that can occur when
+        /// another process has the clipboard locked (which would otherwise crash the handler).
+        /// </summary>
+        private static void CopyToClipboard(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            try { Clipboard.SetText(text); }
+            catch { /* clipboard temporarily unavailable - ignore */ }
         }
 
         /// <summary>
