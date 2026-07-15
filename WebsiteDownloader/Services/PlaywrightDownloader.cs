@@ -19,6 +19,8 @@ namespace WebsiteDownloader.Services
         private Process _currentProcess;
         private volatile bool _isDownloading;
         private bool _disposed;
+        // When reusing a browser profile, the crawl runs against a copy here (see PrepareProfileCopy).
+        private string _activeProfileDir;
 
         /// <inheritdoc/>
         public event EventHandler<DownloadProgressEventArgs> ProgressChanged;
@@ -175,7 +177,14 @@ namespace WebsiteDownloader.Services
                     throw new InvalidOperationException("Crawler not set up. Go to Settings → Advanced → Setup Playwright Engine.");
 
                 if (UseBrowserProfile)
+                {
                     ValidateBrowserProfile();
+                    // Chrome (v136+) blocks remote debugging (which Playwright needs) on the default
+                    // profile directory, so drive a copy in a non-default location instead. The copy
+                    // carries the login session (cookies + Local State) so the crawl is authenticated.
+                    OnProgressChanged("Preparing a private copy of your browser profile...");
+                    _activeProfileDir = PrepareProfileCopy(NormalizeChannel(BrowserChannel));
+                }
 
                 // Always update the crawler script to latest version
                 EnsureLatestScript();
@@ -272,6 +281,7 @@ namespace WebsiteDownloader.Services
             finally
             {
                 CleanupProcess();
+                CleanupProfileCopy();
                 _isDownloading = false;
             }
         }
@@ -317,7 +327,8 @@ namespace WebsiteDownloader.Services
             if (UseBrowserProfile)
             {
                 var channel = NormalizeChannel(BrowserChannel);
-                var dataDir = ResolveUserDataDir(channel);
+                // Use the copy prepared in DownloadAsync; fall back to the real dir if absent.
+                var dataDir = _activeProfileDir ?? ResolveUserDataDir(channel);
                 var profileDir = string.IsNullOrWhiteSpace(ProfileDirectory) ? "Default" : ProfileDirectory;
 
                 sb.Append($"--browser-channel {channel} ");
@@ -397,6 +408,84 @@ namespace WebsiteDownloader.Services
                 Arguments = args,
                 UseShellExecute = false
             });
+        }
+
+        /// <summary>
+        /// Path to the working copy of the browser profile the crawl drives.
+        /// </summary>
+        private static string ProfileCopyDir => Path.Combine(AppConstants.AppDataFolder, "crawler", "profile-copy");
+
+        /// <summary>
+        /// Copies the session-bearing parts of the user's profile to a non-default directory and
+        /// returns its path. Chrome (v136+) refuses remote debugging on the default profile dir,
+        /// so Playwright must drive a copy. Only cookies/storage are copied (not the large caches);
+        /// the browser must be closed (enforced by <see cref="ValidateBrowserProfile"/>) for a clean copy.
+        /// </summary>
+        private string PrepareProfileCopy(string channel)
+        {
+            var realUserData = ResolveUserDataDir(channel);
+            var profileDir = string.IsNullOrWhiteSpace(ProfileDirectory) ? "Default" : ProfileDirectory;
+            var copyRoot = ProfileCopyDir;
+
+            CleanupProfileCopy();
+            Directory.CreateDirectory(Path.Combine(copyRoot, profileDir));
+
+            // "Local State" (at the User Data root) holds the key that decrypts the cookies.
+            var localState = Path.Combine(realUserData, "Local State");
+            if (File.Exists(localState))
+                File.Copy(localState, Path.Combine(copyRoot, "Local State"), true);
+
+            // Session data from the profile; deliberately excludes Cache/Code Cache/GPUCache etc.
+            var srcProfile = Path.Combine(realUserData, profileDir);
+            var dstProfile = Path.Combine(copyRoot, profileDir);
+            string[] items = { "Network", "Local Storage", "Session Storage", "IndexedDB", "Preferences", "Login Data", "Cookies", "Web Data" };
+            foreach (var item in items)
+            {
+                var src = Path.Combine(srcProfile, item);
+                var dst = Path.Combine(dstProfile, item);
+                try
+                {
+                    if (Directory.Exists(src)) CopyDirectory(src, dst);
+                    else if (File.Exists(src)) File.Copy(src, dst, true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning($"Could not copy profile item '{item}': {ex.Message}");
+                }
+            }
+
+            _logger.Info($"Prepared profile copy at {copyRoot}");
+            return copyRoot;
+        }
+
+        /// <summary>
+        /// Recursively copies a directory.
+        /// </summary>
+        private static void CopyDirectory(string src, string dst)
+        {
+            Directory.CreateDirectory(dst);
+            foreach (var file in Directory.GetFiles(src))
+                File.Copy(file, Path.Combine(dst, Path.GetFileName(file)), true);
+            foreach (var dir in Directory.GetDirectories(src))
+                CopyDirectory(dir, Path.Combine(dst, Path.GetFileName(dir)));
+        }
+
+        /// <summary>
+        /// Deletes the working profile copy (it contains the user's cookies/session, so it is not
+        /// left on disk after the crawl).
+        /// </summary>
+        private void CleanupProfileCopy()
+        {
+            _activeProfileDir = null;
+            try
+            {
+                if (Directory.Exists(ProfileCopyDir))
+                    Directory.Delete(ProfileCopyDir, true);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"Could not delete profile copy: {ex.Message}");
+            }
         }
 
         /// <summary>
